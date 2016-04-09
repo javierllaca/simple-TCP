@@ -13,9 +13,9 @@ Three programs must be run at the same time: the sender, receiver, and a link em
 ### Sender
 
     python sender.py <filename> <remote_IP> <remote_port> <ack_port_num> <log_filename> <window_size>
-    python sender.py file.txt localhost 41192 6000 logfile.txt 1152
+    python sender.py file.txt localhost 41192 6000 stdout 1152
 
 ### Receiver
 
     python receiver.py <filename> <listening_port> <sender_IP> <sender_port> <log_filename>
-    python receiver.py file.txt 41194 localhost 6000 [log.txt]
+    python receiver.py received_file.txt 41194 localhost 6000 stdout
