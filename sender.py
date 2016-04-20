@@ -44,7 +44,6 @@ class Sender:
         self.timeout_interval = 3
 
         self.segments_in_transit = OrderedDict()
-        self.segments_acked = set()
 
         self.inputs = [self.recv_sock, self.file]
 
@@ -58,6 +57,9 @@ class Sender:
     def timeout(self):
         return util.current_time() - self.timer_start > self.timeout_interval
 
+    def ready_to_close(self):
+        return self.file.closed and not self.segments_in_transit
+
     def process_file(self):
         if len(self.segments_in_transit) >= self.window_size:
             return
@@ -65,10 +67,9 @@ class Sender:
         if not payload:
             self.file.close()
             self.inputs.remove(self.file)
-            self.send_segment(payload=' ', FIN=1)
         else:
             if self.timer_start == float('inf'):
-                self.timer_start = util.current_time()
+                self.reset_timer()
             self.send_segment(payload)
 
     def process_ack(self):
@@ -76,20 +77,19 @@ class Sender:
         if util.checksum(segment) != 0:
             return
         header, payload = deserialize(segment)
-        if header.seq_num in self.segments_acked:
+        if header.seq_num not in self.segments_in_transit:
             return
-        self.segments_acked.add(header.seq_num)
         if header.FIN:
             self.done = True
-            return
-        self.ACK = 1 if header.seq_num == self.ack_num else 0
+        if header.seq_num == self.ack_num:
+            self.reset_timer()
+            self.ACK = 1
+        else:
+            self.ACK = 0
         self.segments_in_transit.pop(header.seq_num)
         if self.segments_in_transit:
             seq_num, _ = self.next_segment()
-            if header.seq_num == seq_num:
-                self.reset_timer()  # timer corresponds to first segment
-            else:
-                self.ack_num = seq_num
+            self.ack_num = seq_num
         self.update_stats()
 
     def next_segment(self):
@@ -122,6 +122,8 @@ class Sender:
                     self.process_ack()
                 elif readable == self.file:
                     self.process_file()
+            if self.ready_to_close():
+                self.send_segment(payload=' ', FIN=1)
         print (
             'Delivery completed successfully\n'
             'Total bytes sent = {}\n'

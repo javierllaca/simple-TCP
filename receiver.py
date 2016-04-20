@@ -27,6 +27,8 @@ class Receiver:
 
         self.ACK = 0
 
+        self.bytes_received = 0
+
         self.segments_acked = set()
         self.pending = []
 
@@ -52,6 +54,7 @@ class Receiver:
         ack = header.seq_num + len(payload)
         if ack in self.segments_acked:
             return
+        self.bytes_received += len(payload)
         self.segments_acked.add(ack)
         self.ACK = 1 if header.seq_num == self.ack_num else 0
         ack_header, ack_segment = self.make_segment(payload, header.FIN)
@@ -80,6 +83,7 @@ class Receiver:
 
     def close(self):
         print 'Delivery completed successfully'
+        print 'Received {} bytes'.format(self.bytes_received)
         self.file.close()
         self.log_file.close()
 
