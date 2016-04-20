@@ -12,11 +12,13 @@ class Sender:
 
     def __init__(self, filename, remote_ip, remote_port, ack_port,
             log_filename, window_size):
-        self.send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        remote_ip, sock_family = util.addr_family(remote_ip, remote_port)
+
+        self.send_sock = socket.socket(sock_family, socket.SOCK_DGRAM)
         self.send_addr = remote_ip, remote_port
 
-        self.recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.recv_addr = 'localhost', ack_port
+        self.recv_sock = socket.socket(sock_family, socket.SOCK_DGRAM)
+        self.recv_addr = socket.gethostname(), ack_port
         self.recv_sock.bind(self.recv_addr)
 
         self.file = util.open_read_file(filename)
@@ -26,6 +28,13 @@ class Sender:
 
         self.seq_num = 0
         self.ack_num = 0
+
+        self.ACK = 0
+
+        self.done = False
+
+        self.segments_sent = 0
+        self.segments_retransmitted = 0
 
         self.sample_rtt = 0
         self.estimated_rtt = 0
@@ -38,9 +47,6 @@ class Sender:
         self.segments_acked = set()
 
         self.inputs = [self.recv_sock, self.file]
-
-    def done_sending(self):
-        return self.file.closed and not self.segments_in_transit
 
     def update_stats(self):
         self.sample_rtt = util.current_time() - self.timer_start
@@ -59,14 +65,11 @@ class Sender:
         if not payload:
             self.file.close()
             self.inputs.remove(self.file)
+            self.send_segment(payload=' ', FIN=1)
         else:
             if self.timer_start == float('inf'):
                 self.timer_start = util.current_time()
-            header, segment = self.make_segment(payload=payload)
-            self.send_sock.sendto(segment, self.send_addr)
-            self.log(header)
-            self.segments_in_transit[self.seq_num] = payload
-            self.seq_num += len(payload)
+            self.send_segment(payload)
 
     def process_ack(self):
         segment = self.recv_sock.recv(1024)
@@ -76,14 +79,17 @@ class Sender:
         if header.seq_num in self.segments_acked:
             return
         self.segments_acked.add(header.seq_num)
+        if header.FIN:
+            self.done = True
+            return
+        self.ACK = 1 if header.seq_num == self.ack_num else 0
         self.segments_in_transit.pop(header.seq_num)
         if self.segments_in_transit:
             seq_num, _ = self.next_segment()
             if header.seq_num == seq_num:
                 self.reset_timer()  # timer corresponds to first segment
-            self.ack_num = seq_num
-        else:
-            self.ack_num += len(payload)
+            else:
+                self.ack_num = seq_num
         self.update_stats()
 
     def next_segment(self):
@@ -96,6 +102,7 @@ class Sender:
             payload=payload
         )
         self.send_sock.sendto(segment, self.send_addr)
+        self.segments_retransmitted += 1
         self.log(header)
 
     def reset_timer(self):
@@ -106,7 +113,7 @@ class Sender:
         self.reset_timer()
 
     def run(self):
-        while not self.done_sending():
+        while not self.done:
             readables, _, _ = select(self.inputs ,[], [], 0)
             if self.timeout():
                 self.resolve_timeout()
@@ -115,13 +122,21 @@ class Sender:
                     self.process_ack()
                 elif readable == self.file:
                     self.process_file()
-        self.send_fin_segment()
+        print (
+            'Delivery completed successfully\n'
+            'Total bytes sent = {}\n'
+            'Segments sent = {}\n'
+            'Segments retransmitted = {}'
+        ).format(self.seq_num, self.segments_sent, self.segments_retransmitted)
         self.log_file.close()
 
-    def send_fin_segment(self):
-        header, segment = self.make_segment(FIN=1, payload=' ')
+    def send_segment(self, payload, FIN=0):
+        header, segment = self.make_segment(FIN=FIN, payload=payload)
         self.send_sock.sendto(segment, self.send_addr)
         self.log(header)
+        self.segments_in_transit[self.seq_num] = payload
+        self.segments_sent += 1
+        self.seq_num += len(payload)
 
     def make_segment(self, seq_num=None, FIN=0, payload=''):
         return serialize(
@@ -130,7 +145,8 @@ class Sender:
             seq_num or self.seq_num,
             self.ack_num,
             FIN=FIN,
-            payload=payload
+            payload=payload,
+            ACK=self.ACK
         )
 
     def log(self, header):

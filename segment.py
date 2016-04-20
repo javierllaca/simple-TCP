@@ -25,9 +25,6 @@ class TCPSegmentHeader(Structure):
     def serialize(self):
         return buffer(self)[:]
 
-    def __len__(self):
-        return sizeof(self)
-
     def flag_string(self):
         flags = []
         if self.URG:
@@ -44,17 +41,20 @@ class TCPSegmentHeader(Structure):
             flags.append('FIN')
         return ' '.join(flags)
 
+    def __len__(self):
+        return sizeof(self)
+
     def __str__(self):
-        return '\n'.join([
-            'src_port: {}'.format(self.src_port),
-            'dst_port: {}'.format(self.dst_port),
-            'seq_num: {}'.format(self.seq_num),
-            'ack_num: {}'.format(self.ack_num),
-            'hdr_len: {}'.format(self.hdr_len),
-            'flags: [{}]'.format(self.flag_string()),
-            'checksum: {}'.format(self.checksum),
-            'urgent_pointer: {}'.format(self.urgent_pointer)
-        ])
+        return ('{{src_port: {}, dst_port: {}, seq_num: {}, ack_num: {}, '
+            'hdr_len: {}, flags: [{}], checksum: {}}}'.format(
+                self.src_port,
+                self.dst_port,
+                self.seq_num,
+                self.ack_num,
+                self.hdr_len,
+                self.flag_string(),
+                self.checksum
+            ))
 
 
 def serialize(src_port, dst_port, seq_num, ack_num,

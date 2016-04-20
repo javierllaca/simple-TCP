@@ -10,11 +10,13 @@ class Receiver:
 
     def __init__(self, filename, listening_port, sender_ip, sender_port,
             log_filename):
-        self.send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sender_ip, sock_family = util.addr_family(sender_ip, sender_port)
+
+        self.send_sock = socket.socket(sock_family, socket.SOCK_DGRAM)
         self.send_addr = sender_ip, sender_port
 
-        self.recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.recv_addr = 'localhost', listening_port
+        self.recv_sock = socket.socket(sock_family, socket.SOCK_DGRAM)
+        self.recv_addr = socket.gethostname(), listening_port
         self.recv_sock.bind(self.recv_addr)
 
         self.file = util.open_write_file(filename)
@@ -23,16 +25,17 @@ class Receiver:
         self.seq_num = 0
         self.ack_num = 0
 
-        self.segments_acked = set()
-        self.pending_seq_num = []
-        self.pending_payloads = {}
+        self.ACK = 0
 
-        self.fin = False
+        self.segments_acked = set()
+        self.pending = []
+
+        self.done = False
 
         self.inputs = [self.recv_sock]
 
     def run(self):
-        while not self.fin:
+        while not self.done:
             readables, _, _ = select(self.inputs ,[], [], 0)
             for readable in readables:
                 if readable == self.recv_sock:
@@ -50,46 +53,44 @@ class Receiver:
         if ack in self.segments_acked:
             return
         self.segments_acked.add(ack)
-        ack_header, ack_segment = self.make_segment(payload)
+        self.ACK = 1 if header.seq_num == self.ack_num else 0
+        ack_header, ack_segment = self.make_segment(payload, header.FIN)
         self.send_sock.sendto(ack_segment, self.send_addr)
         if header.FIN:
-            self.fin = True
+            self.done = True
             return
         self.store_payload(header.seq_num, payload)
         seq_num, payload = self.fetch_next_payload()
         while seq_num == self.ack_num:
             self.file.write(payload)
             self.ack_num += len(payload)
-            _, _ = self.pop_next_payload()
+            self.pop_next_payload()
             seq_num, payload = self.fetch_next_payload()
 
     def pop_next_payload(self):
-        seq_num = heappop(self.pending_seq_num)
-        payload = self.pending_payloads.pop(seq_num)
-        return seq_num, payload
+        return heappop(self.pending)
 
     def fetch_next_payload(self):
-        seq_num, payload = None, None
-        if self.pending_seq_num:
-            seq_num = self.pending_seq_num[0]
-            payload = self.pending_payloads[seq_num]
-        return seq_num, payload
+        if self.pending:
+            return self.pending[0]
+        return None, None
 
     def store_payload(self, seq_num, payload):
-        heappush(self.pending_seq_num, seq_num)
-        self.pending_payloads[seq_num] = payload
+        heappush(self.pending, (seq_num, payload))
 
     def close(self):
+        print 'Delivery completed successfully'
         self.file.close()
         self.log_file.close()
 
-    def make_segment(self, payload=''):
+    def make_segment(self, payload, FIN):
         return serialize(
             self.src_port,
             self.dst_port,
             self.seq_num,
             self.ack_num,
-            payload=payload
+            payload=payload,
+            FIN=FIN
         )
 
     def log(self, header):

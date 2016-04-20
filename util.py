@@ -1,4 +1,5 @@
 import os
+import socket
 import struct
 import sys
 import time
@@ -36,3 +37,14 @@ def current_time():
 
 def current_time_string():
     return time.strftime('%m-%d-%yT%H:%M:%S')
+
+
+def addr_family(host, port):
+    info = socket.getaddrinfo(host, port)
+    ipv4 = filter(lambda y: y[0] == socket.AF_INET, info)
+    ipv6 = filter(lambda y: y[0] == socket.AF_INET6, info)
+    if ipv4:
+        return ipv4[0][4][0], socket.AF_INET
+    elif ipv6:
+        return ipv6[0][4][0], socket.AF_INET6
+    raise Exception('Invalid host: {}'.format(host))
