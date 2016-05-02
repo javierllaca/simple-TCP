@@ -8,15 +8,15 @@ Three programs must be run at the same time: the sender, receiver, and a link em
 
 ### Sender
 
-See `sender.sh` for examples.
+See `test/sender.sh` for examples.
 
 ### Receiver
 
-See `receive.sh` for examples.
+See `test/receive.sh` for examples.
 
 ### Link emulator
 
-See `link.sh` for examples.
+See `test/link.sh` for examples.
 
 ## Extra Credit
 
